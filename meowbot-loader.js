@@ -1,86 +1,203 @@
-// 🚨 ATENÇÃO: A URL do seu novo Backend já está configurada abaixo. 🚨
-const MEOWBOT_API_URL_BASE = "https://chatbot-dedicado.onrender.com"; 
-const SEU_GITHUB_PAGES_BASE = "https://leanttro.github.io/chatbot1_grafica/"; 
+// ======================================================================
+// MEOWBOT LOADER - Lógica de Chat Nível 1 (Q&A Simples e Captura de Lead)
+// Arquivo a ser subido no GitHub Pages (leanttro.github.io/chatbot1_grafica/meowbot-loader.js)
+// ======================================================================
 
-(function() {
-    console.log("[Leanttro] Iniciando injeção do MeowBot...");
+// Variáveis de Configuração
+// MEOWBOT_API_URL será injetada como "https://chatbot-dedicado.onrender.com" pelo comando F12.
+const MEOWBOT_API_BASE_URL = window.MEOWBOT_API_URL || "https://chatbot-dedicado.onrender.com"; // Fallback seguro
+const API_ENDPOINT = MEOWBOT_API_BASE_URL + '/api/chat';
+
+// Variáveis de Estado
+let conversationHistory = []; 
+let currentLeadId = null; 
+let leadData = {}; // Armazena dados extraídos (nome, email, etc.)
+let isProcessing = false;
+
+// IDs dos elementos (Assumindo que o HTML já foi injetado pelo snippet F12)
+const chatbotWindow = document.getElementById('chatbotWindow');
+const chatbotClose = document.getElementById('chatbotClose');
+const chatbotInput = document.getElementById('chatbotInput');
+const chatbotSend = document.getElementById('chatbotSend');
+const chatbotMessages = document.getElementById('chatbotMessages');
+const chatbotButton = document.getElementById('chatbotButton');
+const minimizedIcon = document.getElementById('minimizedIcon');
+const previewClose = document.getElementById('previewClose');
+const previewMessageEl = document.getElementById('preview-message-text');
+
+
+// --- FUNÇÕES AUXILIARES DE UI E FLUXO ---
+
+function getCurrentTime() {
+    const now = new Date();
+    return now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function addMessage(text, isUser = false) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+    let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    formattedText = formattedText.replace(/\n/g, '<br>');
     
-    // Armazena a base do GitHub no corpo para o JS saber onde pegar a imagem
-    document.body.setAttribute('data-github-base', SEU_GITHUB_PAGES_BASE);
+    conversationHistory.push({ 
+        role: isUser ? 'user' : 'model', 
+        text: text 
+    });
     
-    // --- 1. VESTINDO O ROBÔ (CSS) ---
-    const cssLink = document.createElement('link');
-    cssLink.rel = 'stylesheet';
-    cssLink.href = SEU_GITHUB_PAGES_BASE + 'chatbot.css'; 
-    document.head.appendChild(cssLink);
+    const avatarImg = document.body.getAttribute('data-github-base') + 'leanttro.png';
+
+    const avatarHtml = isUser
+        ? '<i class="fas fa-user"></i>'
+        : `<img src="${avatarImg}" alt="Bot Avatar" style="width: 100%; height: 100%; border-radius: 50%;">`;
     
-    // --- 2. MONTANDO O CORPO DO ROBÔ (HTML) ---
-    const chatbotHtml = `
-        <div class="floating-chatbot">
-            <div id="chatbotButtonContainer">
-                <div class="chatbot-minimized-icon" id="minimizedIcon" aria-label="Abrir Chatbot">
-                     <img src="${SEU_GITHUB_PAGES_BASE}leanttro.png" alt="Bot" style="width: 100%; height: 100%; border-radius: 50%;">
-                </div>
-                <div class="chatbot-preview-button" id="chatbotButton" aria-label="Abrir MeowBot">
-                    <button class="preview-close" id="previewClose" aria-label="Minimizar Preview"><i class="fas fa-times"></i></button>
-                    <div class="preview-header">
-                        <div class="preview-avatar">
-                            <img src="${SEU_GITHUB_PAGES_BASE}leanttro.png" alt="Bot" style="width: 100%; height: 100%; border-radius: 50%;">
-                        </div>
-                        <div class="preview-info">
-                            <strong>Meow<span>Bot</span></strong>
-                            <span>Assistente Virtual</span>
-                        </div>
-                    </div>
-                    <div class="preview-message-bubble">
-                        <span id="preview-message-text">Miau! 🐱 Posso ajudar com seu pedido?</span>
-                    </div>
-                </div>
-            </div>
-            <div class="chatbot-window" id="chatbotWindow">
-                <div class="chatbot-header" style="background: linear-gradient(135deg, #4A00E0, #8E2DE2);">
-                    <div class="chatbot-header-avatar">
-                        <img src="${SEU_GITHUB_PAGES_BASE}leanttro.png" alt="Bot" style="width: 100%; height: 100%; border-radius: 50%;">
-                    </div>
-                    <div class="chatbot-header-info">
-                        <h3>Meow<span>Bot</span></h3>
-                        <p>Assistente de IA</p>
-                    </div>
-                    <button class="chatbot-close" id="chatbotClose" aria-label="Fechar chat"><i class="fas fa-times"></i></button>
-                </div>
-                <div class="chatbot-messages" id="chatbotMessages"></div>
-                <div class="chatbot-input-area">
-                    <input type="text" class="chatbot-input" id="chatbotInput" placeholder="Digite sua mensagem..." autocomplete="off">
-                    <button class="chatbot-send" id="chatbotSend" aria-label="Enviar mensagem">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256"><path d="M232,128a8,8,0,0,1-8.53,8l-176,48A8,8,0,0,1,32,176V136H160a8,8,0,0,0,0-16H32V80a8,8,0,0,1,15.47-4l176,48A8,8,0,0,1,232,128Z"></path></svg>
-                    </button>
-                </div>
+    messageDiv.innerHTML = `
+        <div class="message-avatar">
+            ${avatarHtml}
+        </div>
+        <div class="message-content">
+            <div class="message-bubble">${formattedText}</div>
+            <div class="message-time">${getCurrentTime()}</div>
+        </div>
+    `;
+    if (chatbotMessages) {
+        chatbotMessages.appendChild(messageDiv);
+        chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+    }
+}
+
+function showTypingIndicator() {
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message bot typing-message';
+    typingDiv.id = 'typing-indicator';
+    const avatarImg = document.body.getAttribute('data-github-base') + 'leanttro.png';
+
+    typingDiv.innerHTML = `
+        <div class="message-avatar">
+             <img src="${avatarImg}" alt="Bot Avatar" style="width: 100%; height: 100%; border-radius: 50%;">
+        </div>
+        <div class="message-content">
+            <div class="message-bubble">
+                <div class="typing-indicator"><span></span><span></span><span></span></div>
             </div>
         </div>
     `;
-    document.body.insertAdjacentHTML('beforeend', chatbotHtml);
-    
-    // --- 3. DANDO ACESSÓRIOS AO ROBÔ (ÍCONES) ---
-    const faLink = document.createElement('link');
-    faLink.rel = 'stylesheet';
-    faLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';
-    document.head.appendChild(faLink);
-    
-    // --- 4. LIGANDO O CÉREBRO DO ROBÔ (JAVASCRIPT) ---
-    const jsScript = document.createElement('script');
-    jsScript.src = SEU_GITHUB_PAGES_BASE + 'meowbot-loader.js'; 
-    document.body.appendChild(jsScript);
+    if (chatbotMessages) {
+        chatbotMessages.appendChild(typingDiv);
+        chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+    }
+}
 
-    // CRÍTICO: Passa a URL correta diretamente para o ambiente global ANTES que o meowbot-loader.js se inicialize
-    // O meowbot-loader.js deve ser editado para USAR window.MEOWBOT_API_URL + '/api/chat'
-    window.MEOWBOT_API_URL = MEOWBOT_API_URL_BASE; 
-    
-    // CRÍTICO: Tenta re-inicializar com a URL correta se a injeção for tardia
-    const checkInit = setInterval(() => {
-        if (window.MEOWBOT_API_URL && window.MEOWBOT_API_URL !== "https://meowbot-api.onrender.com" && window.handleSendMessage) {
-            clearInterval(checkInit);
-            console.log("✅ [MeowBot] Inicialização de URL concluída.");
-        }
-    }, 100);
+function removeTypingIndicator() {
+    const typingDiv = document.getElementById('typing-indicator');
+    if (typingDiv && typingDiv.parentNode) {
+        typingDiv.parentNode.removeChild(typingDiv);
+    }
+}
 
-})();
+function startMeowChat() {
+    conversationHistory = [];
+    leadData = {};
+    currentLeadId = null;
+    // Adiciona a primeira mensagem do bot (que é o System Prompt do MeowCake no backend)
+    addMessage("Miau! 🐱 Sou o **MeowBot**, seu assistente de pedidos. Como posso ajudar com os Manhwas ou com seu rastreio?", false);
+}
+
+function toggleChat() {
+    if (!chatbotWindow) return;
+    const isActive = chatbotWindow.classList.contains('active');
+    
+    if (isActive) {
+        // Fechar chat
+        chatbotWindow.classList.remove('active');
+        if (chatbotButton) chatbotButton.classList.remove('active');
+        if (minimizedIcon) minimizedIcon.classList.remove('active');
+    } else {
+        // Abrir chat
+        chatbotWindow.classList.add('active');
+        if (chatbotButton) chatbotButton.classList.add('active'); 
+        if (minimizedIcon) minimizedIcon.classList.add('active'); 
+        
+        setTimeout(() => {
+            if (chatbotMessages && chatbotMessages.children.length === 0) {
+                startMeowChat(); 
+            }
+            if (chatbotInput) chatbotInput.focus();
+        }, 300);
+    }
+}
+
+// --- FUNÇÃO PRINCIPAL DE COMUNICAÇÃO COM A API ---
+async function handleSendMessage() {
+    if (!chatbotInput || !chatbotSend || isProcessing) return;
+
+    const messageText = chatbotInput.value.trim();
+    if (messageText === '') return;
+
+    addMessage(messageText, true); 
+    chatbotInput.value = '';
+    
+    isProcessing = true;
+    chatbotInput.disabled = true;
+    chatbotSend.disabled = true;
+    showTypingIndicator();
+
+    try {
+        const response = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                conversationHistory: conversationHistory, 
+                leadData: leadData,
+                leadId: currentLeadId
+            })
+        });
+
+        if (!response.ok) throw new Error('Falha na resposta da IA. (Verifique o log do Render)');
+        
+        const data = await response.json();
+        const botReply = data.botResponse;
+        
+        leadData = data.leadData || leadData;
+        currentLeadId = data.leadId || currentLeadId;
+
+        addMessage(botReply, false);
+
+    } catch (error) {
+        console.error('🔴 ERRO DE COMUNICAÇÃO DO MEOWBOT:', error);
+        addMessage("Miau! Desculpe, estou com problemas para me conectar ao meu cérebro de IA no momento. Tente novamente mais tarde.", false);
+    } finally {
+        isProcessing = false;
+        removeTypingIndicator();
+        chatbotInput.disabled = false;
+        chatbotSend.disabled = false;
+        chatbotInput.focus();
+    }
+}
+
+
+// =================================================================================
+// --- ADICIONANDO LISTENERS AO DOM ---
+// =================================================================================
+setTimeout(() => {
+    if (window.location.host === 'meowcakeshop.com' || window.location.host.includes('leanttro.github.io')) { 
+        if (chatbotButton) chatbotButton.addEventListener('click', toggleChat);
+        if (chatbotClose) chatbotClose.addEventListener('click', toggleChat);
+        if (minimizedIcon) minimizedIcon.addEventListener('click', toggleChat);
+        if (previewClose) previewClose.addEventListener('click', function(e) { 
+            e.stopPropagation(); 
+            if (chatbotButton) chatbotButton.classList.add('minimized');
+            if (minimizedIcon) minimizedIcon.classList.add('minimized');
+        });
+    
+        if (chatbotSend) chatbotSend.addEventListener('click', handleSendMessage);
+        if (chatbotInput) chatbotInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSendMessage();
+            }
+        });
+        
+        // Expõe a função ao global para que o snippet F12 possa verificar se o JS carregou
+        window.handleSendMessage = handleSendMessage;
+    }
+}, 500);
