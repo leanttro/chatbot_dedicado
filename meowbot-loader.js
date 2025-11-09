@@ -1,17 +1,16 @@
 // ======================================================================
 // MEOWBOT LOADER - Lógica de Chat Nível 1 (Q&A Simples e Captura de Lead)
-// Arquivo a ser subido no GitHub Pages (leanttro.github.io/chatbot1_grafica/meowbot-loader.js)
+// Este arquivo usa window.MEOWBOT_API_URL, injetada pelo comando F12.
 // ======================================================================
 
 // Variáveis de Configuração
-// MEOWBOT_API_URL será injetada como "https://chatbot-dedicado.onrender.com" pelo comando F12.
-const MEOWBOT_API_BASE_URL = window.MEOWBOT_API_URL || "https://chatbot-dedicado.onrender.com"; // Fallback seguro
-const API_ENDPOINT = MEOWBOT_API_BASE_URL + '/api/chat';
+// Puxa a URL injetada pelo comando F12 (que é a base do seu Render + /api/chat)
+const API_ENDPOINT = window.MEOWBOT_API_URL || "https://chatbot-dedicado.onrender.com/api/chat";
 
 // Variáveis de Estado
 let conversationHistory = []; 
 let currentLeadId = null; 
-let leadData = {}; // Armazena dados extraídos (nome, email, etc.)
+let leadData = {}; 
 let isProcessing = false;
 
 // IDs dos elementos (Assumindo que o HTML já foi injetado pelo snippet F12)
@@ -39,6 +38,7 @@ function addMessage(text, isUser = false) {
     let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formattedText = formattedText.replace(/\n/g, '<br>');
     
+    // CRÍTICO: Registra no histórico para enviar ao backend
     conversationHistory.push({ 
         role: isUser ? 'user' : 'model', 
         text: text 
@@ -98,7 +98,6 @@ function startMeowChat() {
     conversationHistory = [];
     leadData = {};
     currentLeadId = null;
-    // Adiciona a primeira mensagem do bot (que é o System Prompt do MeowCake no backend)
     addMessage("Miau! 🐱 Sou o **MeowBot**, seu assistente de pedidos. Como posso ajudar com os Manhwas ou com seu rastreio?", false);
 }
 
@@ -157,6 +156,7 @@ async function handleSendMessage() {
         const data = await response.json();
         const botReply = data.botResponse;
         
+        // Atualiza o estado do lead e o ID retornado pelo banco de dados
         leadData = data.leadData || leadData;
         currentLeadId = data.leadId || currentLeadId;
 
@@ -179,6 +179,7 @@ async function handleSendMessage() {
 // --- ADICIONANDO LISTENERS AO DOM ---
 // =================================================================================
 setTimeout(() => {
+    // Permite rodar no site do cliente ou no seu GitHub Pages
     if (window.location.host === 'meowcakeshop.com' || window.location.host.includes('leanttro.github.io')) { 
         if (chatbotButton) chatbotButton.addEventListener('click', toggleChat);
         if (chatbotClose) chatbotClose.addEventListener('click', toggleChat);
