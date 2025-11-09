@@ -1,23 +1,6 @@
-Arquivo de dependências para o Render (ou qualquer ambiente Python)
-
-Para a aplicação Flask e suporte a requisições
-
-flask
+Flask
 flask-cors
-gunicorn  # Servidor WSGI para produção no Render
-
-Para a integração com o banco de dados PostgreSQL
-
+gunicorn
 psycopg2-binary
-
-Para carregar variáveis de ambiente (útil para desenvolvimento local)
-
+google-generativeai
 python-dotenv
-
-Para a inteligência artificial
-
-google-genai # ou google-generativeai
-
-Para fazer requisições HTTP (webhooks, APIs externas, etc.)
-
-requests
