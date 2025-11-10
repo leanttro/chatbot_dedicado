@@ -10,11 +10,13 @@ import json
 import requests
 
 # ======================================================================
-# LEANTTRO DEDICATED API v1.0 - Configurado para MeowCake Shop
-# ARQUITETURA SEGURA: Usa CREATE TABLE IF NOT EXISTS
+# API DEDICADA v1.3 - MEOWCAKE SHOP
+# CORREÇÃO:
+# 1. Modelo da IA alterado para 'gemini-2.5-flash-preview-09-2025' (baseado no seu app da Gráfica)
+# 2. Lógica de 'system_instruction' corrigida para o padrão novo (passando na criação do modelo)
 # ======================================================================
 
-print("ℹ️  Iniciando API Dedicada do Cliente (MeowCake)...")
+print("ℹ️  Iniciando API Dedicada do Cliente (MeowCake v1.3)...")
 load_dotenv()
 
 app = Flask(__name__)
@@ -24,7 +26,7 @@ CORS(app)
 try:
     DATABASE_URL = os.environ.get("DATABASE_URL")
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-    CLIENT_WEBHOOK_URL = os.environ.get("CLIENT_WEBHOOK_URL") 
+    # CLIENT_WEBHOOK_URL = os.environ.get("CLIENT_WEBHOOK_URL") # (Não usado aqui)
 
     if not DATABASE_URL:
         print("⚠️ AVISO: DATABASE_URL não encontrada. O app vai rodar sem salvar dados.")
@@ -38,7 +40,6 @@ except Exception as e:
     print(f"🔴 Erro na inicialização: {e}")
 
 # --- 2. Banco de Dados do Cliente ---
-# CRÍTICO: Garantir que as tabelas NÃO sejam recriadas (apenas criadas se não existirem).
 def setup_client_database():
     """Configura o banco de dados exclusivo deste cliente (CRIAR APENAS SE NÃO EXISTIR)."""
     if not DATABASE_URL: return
@@ -83,7 +84,7 @@ def setup_client_database():
     finally:
         if conn: conn.close()
 
-# --- 3. Rota de Diagnóstico (Para você testar se o deploy deu certo) ---
+# --- 3. Rota de Diagnóstico ---
 @app.route('/api/status')
 def status_check():
     db_status = "offline"
@@ -103,7 +104,8 @@ def status_check():
     })
 
 
-# --- 4. O CÉREBRO DO MEOWCAKE (PROMPT ATUALIZADO) ---
+# --- 4. O CÉREBRO DO MEOWCAKE (PROMPT) ---
+# (Sem mudanças aqui, o prompt do MeowCake continua o mesmo)
 SYSTEM_PROMPT_MEOWCAKE = f"""
 Você é o 'MeowBot', o assistente de IA oficial da MeowCake Shop (loja de Manhwas e Novels asiáticas).
 Sua missão é ajudar os clientes a encontrar produtos e responder dúvidas sobre a loja, de forma amigável e fofa (use "miau" ou emojis como 🐱 de vez em quando).
@@ -150,30 +152,51 @@ def client_chat():
     lead_data = data.get('leadData', {})
     lead_id = data.get('leadId')
     
+    # O prompt do sistema é definido aqui
     system_instruction = SYSTEM_PROMPT_MEOWCAKE 
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_instruction) # Usei 1.5-flash, é mais novo
+        # --- [INÍCIO DA CORREÇÃO v1.3] ---
+        # 1. Usamos o nome do modelo do seu app da Gráfica [source 2]
+        # 2. Passamos o prompt do MeowCake na *criação* do modelo, como no seu app da Gráfica [source 2]
+        model = genai.GenerativeModel(
+            'gemini-2.5-flash-preview-09-2025', # [source 2]
+            system_instruction=system_instruction
+        )
+        # --- [FIM DA CORREÇÃO v1.3] ---
+
         gemini_history = [{'role': 'user' if msg['role'] == 'user' else 'model', 'parts': [{'text': msg['text']}]} for msg in history]
 
         print(f"ℹ️  [MeowBot] Gerando resposta para Lead ID: {lead_id}")
+        
+        # Chamamos generate_content SEM o 'system_instruction', pois ele já está no 'model' [source 2]
         response = model.generate_content(
             gemini_history,
-            generation_config=genai.types.GenerationConfig(temperature=0.7, response_mime_type="application/json")
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7, 
+                response_mime_type="application/json"
+            ),
+            safety_settings={'HATE': 'BLOCK_NONE', 'HARASSMENT': 'BLOCK_NONE', 'SEXUAL' : 'BLOCK_NONE', 'DANGEROUS' : 'BLOCK_NONE'} # [source 2]
         )
         
-        # A resposta da IA já é um objeto JSON por causa do prompt, não precisa de json.loads() no .text
-        ai_response = response.candidates[0].content.parts[0].text
-        # Convertemos o *texto* da resposta (que é um JSON string) para um dicionário Python
-        ai_response_dict = json.loads(ai_response) 
+        # --- Lógica de Limpeza de JSON (Robusta v1.1) ---
+        raw_response_text = response.text
+        if "```json" in raw_response_text:
+            print("⚠️  [MeowBot] Detectado markdown na resposta JSON. Limpando...")
+            raw_response_text = raw_response_text.split('```json\n', 1)[-1].rsplit('\n```', 1)[0]
+        raw_response_text = raw_response_text.strip()
+        
+        ai_response_dict = json.loads(raw_response_text) 
+        # --- Fim da Lógica de Limpeza ---
 
         new_lead_data = {**lead_data, **ai_response_dict.get('extractedData', {})}
+        bot_response = ai_response_dict.get('botResponse', 'Miau! Tive um probleminha, pode repetir?')
 
         # Salva no banco DESTE cliente
-        final_lead_id = save_to_client_db(lead_id, new_lead_data, history + [{'role': 'bot', 'text': ai_response_dict.get('botResponse')}])
+        final_lead_id = save_to_client_db(lead_id, new_lead_data, history + [{'role': 'bot', 'text': bot_response}])
 
         return jsonify({
-            "botResponse": ai_response_dict.get('botResponse'),
+            "botResponse": bot_response,
             "leadData": new_lead_data,
             "leadId": final_lead_id
         })
@@ -181,6 +204,8 @@ def client_chat():
     except Exception as e:
         print(f"🔴 ERRO [MeowBot API]: {e}")
         traceback.print_exc()
+        if 'response' in locals():
+            print(f"🔴 Resposta Bruta da IA (que causou o erro): {response.text}")
         return jsonify({"error": "Erro interno no assistente."}), 500
 
 def save_to_client_db(lead_id, data, history):
@@ -203,7 +228,7 @@ def save_to_client_db(lead_id, data, history):
             """, (data.get('nome'), data.get('email'), data.get('whatsapp'), data.get('empresa'), history_json))
             final_id = cur.fetchone()[0]
             
-        conn.commit() # Commit é necessário tanto no UPDATE quanto no INSERT
+        conn.commit() 
         return final_id
     except Exception as e:
         print(f"🔴 ERRO DB Cliente: {e}")
