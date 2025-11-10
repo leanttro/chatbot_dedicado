@@ -103,7 +103,7 @@ def status_check():
     })
 
 
-# --- 4. O CÉREBRO DO MEOWCAKE (PROMPT CHUMBADO) ---
+# --- 4. O CÉREBRO DO MEOWCAKE (PROMPT ATUALIZADO) ---
 SYSTEM_PROMPT_MEOWCAKE = f"""
 Você é o 'MeowBot', o assistente de IA oficial da MeowCake Shop (loja de Manhwas e Novels asiáticas).
 Sua missão é ajudar os clientes a encontrar produtos e responder dúvidas sobre a loja, de forma amigável e fofa (use "miau" ou emojis como 🐱 de vez em quando).
@@ -119,6 +119,27 @@ REGRAS DE CAPTURA DE LEAD (IMPORTANTE):
 Se o cliente tiver um problema complexo de rastreamento ou uma dúvida de troca, seu objetivo é capturar o nome e o email dele para a equipe humana resolver.
 Siga este script:
 '"Miau! 🐾 Entendi o problema. Para eu pedir para a equipe verificar seu caso, qual é o seu nome e o email?"'
+
+REGRAS DE SAÍDA (OBRIGATÓRIO):
+Sua resposta DEVE ser um JSON válido.
+O JSON deve ter DOIS campos: "botResponse" (string) e "extractedData" (objeto).
+- "botResponse": Contém sua resposta de chat amigável.
+- "extractedData": Contém os dados que você extraiu (nome, email, etc.). Se nada foi extraído, envie um objeto vazio {{}}.
+
+Exemplo de resposta para uma pergunta simples:
+{{
+  "botResponse": "Miau! 🐱 Nós vendemos Manhwas, Manhuas e Light Novels asiáticas.",
+  "extractedData": {{}}
+}}
+
+Exemplo de resposta após capturar um lead:
+{{
+  "botResponse": "Obrigada, miau! Já anotei seu nome (Fulano) e email (fulano@email.com). A equipe humana vai te contatar em breve! 🐾",
+  "extractedData": {{
+    "nome": "Fulano",
+    "email": "fulano@email.com"
+  }}
+}}
 """
 
 
@@ -132,7 +153,7 @@ def client_chat():
     system_instruction = SYSTEM_PROMPT_MEOWCAKE 
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025', system_instruction=system_instruction)
+        model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_instruction) # Usei 1.5-flash, é mais novo
         gemini_history = [{'role': 'user' if msg['role'] == 'user' else 'model', 'parts': [{'text': msg['text']}]} for msg in history]
 
         print(f"ℹ️  [MeowBot] Gerando resposta para Lead ID: {lead_id}")
@@ -140,15 +161,19 @@ def client_chat():
             gemini_history,
             generation_config=genai.types.GenerationConfig(temperature=0.7, response_mime_type="application/json")
         )
-        ai_response = json.loads(response.text)
+        
+        # A resposta da IA já é um objeto JSON por causa do prompt, não precisa de json.loads() no .text
+        ai_response = response.candidates[0].content.parts[0].text
+        # Convertemos o *texto* da resposta (que é um JSON string) para um dicionário Python
+        ai_response_dict = json.loads(ai_response) 
 
-        new_lead_data = {**lead_data, **ai_response.get('extractedData', {})}
+        new_lead_data = {**lead_data, **ai_response_dict.get('extractedData', {})}
 
         # Salva no banco DESTE cliente
-        final_lead_id = save_to_client_db(lead_id, new_lead_data, history + [{'role': 'bot', 'text': ai_response.get('botResponse')}])
+        final_lead_id = save_to_client_db(lead_id, new_lead_data, history + [{'role': 'bot', 'text': ai_response_dict.get('botResponse')}])
 
         return jsonify({
-            "botResponse": ai_response.get('botResponse'),
+            "botResponse": ai_response_dict.get('botResponse'),
             "leadData": new_lead_data,
             "leadId": final_lead_id
         })
@@ -177,7 +202,8 @@ def save_to_client_db(lead_id, data, history):
                 INSERT INTO client_leads (nome, email, whatsapp, empresa, historico_chat) VALUES (%s, %s, %s, %s, %s) RETURNING id
             """, (data.get('nome'), data.get('email'), data.get('whatsapp'), data.get('empresa'), history_json))
             final_id = cur.fetchone()[0]
-            conn.commit()
+            
+        conn.commit() # Commit é necessário tanto no UPDATE quanto no INSERT
         return final_id
     except Exception as e:
         print(f"🔴 ERRO DB Cliente: {e}")
